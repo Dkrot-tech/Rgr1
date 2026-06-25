@@ -6,40 +6,165 @@
 #include <limits>
 #include <clocale>  
 #include <locale> 
+#include <codecvt>
 using namespace std;
 
-//АЛФАВИТ
-static string getAlphabet() {
-    string rusUpper = "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ";
-    string rusLower = "абвгдеёжзийклмнопрстуфхцчшщъыьэюя";
-    string engUpper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    string engLower = "abcdefghijklmnopqrstuvwxyz";
-    string digits = "0123456789";
-    string specials = "!@#$%^&*()_+-=[]{}|;:,.<>?/`~";
-    return rusUpper + rusLower + engUpper + engLower + digits + specials;
-}
-
-//ОБРАБОТКА СИМВОЛА
-char atbashChar(char c) {
-    string alphabet = getAlphabet();
-    size_t pos = alphabet.find(c);
-    if (pos == string::npos) return c;
-    
-    int N = alphabet.size();
-    int mirroredPos = N - 1 - pos;
-    return alphabet[mirroredPos];
-}
-
-// ОБРАБОТКА ТЕКСТА 
-string atbashProcess(const string& text) {
-    string result = "";
-    for (char c : text) {
-        result += atbashChar(c);
+// КОНВЕРТАЦИЯ UTF-8 -> UTF-16
+static wstring stringToWstring(const string& str) {
+    wstring_convert<codecvt_utf8<wchar_t>> converter;
+    try {
+        return converter.from_bytes(str);
+    } catch (...) {
+        return L"";
     }
-    return result;
 }
 
-//РАБОТА С ФАЙЛАМИ
+// КОНВЕРТАЦИЯ UTF-16 -> UTF-8
+static string wstringToString(const wstring& wstr) {
+    wstring_convert<codecvt_utf8<wchar_t>> converter;
+    try {
+        return converter.to_bytes(wstr);
+    } catch (...) {
+        return "";
+    }
+}
+
+// ПРОВЕРКА НА КИРИЛЛИЦУ
+static bool isCyrillic(wchar_t c) {
+    return (c >= 0x0410 && c <= 0x044F) || c == 0x0401 || c == 0x0451;
+}
+
+// ПРОВЕРКА НА ЛАТИНИЦУ
+static bool isLatin(wchar_t c) {
+    return (c >= L'A' && c <= L'Z') || (c >= L'a' && c <= L'z');
+}
+
+// ПРОВЕРКА, ЯВЛЯЕТСЯ ЛИ СИМВОЛ БУКВОЙ
+static bool isAlpha(wchar_t c) {
+    return isLatin(c) || isCyrillic(c);
+}
+
+// ПРОВЕРКА НА ЦИФРУ
+static bool isDigit(wchar_t c) {
+    return (c >= L'0' && c <= L'9');
+}
+
+// ПРОВЕРКА, ЯВЛЯЕТСЯ ЛИ СИМВОЛ БУКВОЙ ИЛИ ЦИФРОЙ
+static bool isAlnum(wchar_t c) {
+    return isAlpha(c) || isDigit(c);
+}
+
+// ПЕРЕВОД В ВЕРХНИЙ РЕГИСТР
+static wchar_t toUpper(wchar_t c) {
+    if (isLatin(c)) {
+        if (c >= L'a' && c <= L'z') {
+            return c - (L'a' - L'A');
+        }
+        return c;
+    }
+
+    if (isCyrillic(c)) {
+        if (c >= 0x0430 && c <= 0x044F) {
+            return c - 0x20;
+        }
+        if (c == 0x0451) return 0x0401;
+        return c;
+    }
+    return c;
+}
+
+// ПЕРЕВОД В НИЖНИЙ РЕГИСТР
+static wchar_t toLower(wchar_t c) {
+    if (isLatin(c)) {
+        if (c >= L'A' && c <= L'Z') {
+            return c + (L'a' - L'A');
+        }
+        return c;
+    }
+
+    if (isCyrillic(c)) {
+        if (c >= 0x0410 && c <= 0x044F) {
+            return c + 0x20;
+        }
+        if (c == 0x0401) return 0x0451;
+        return c;
+    }
+    return c;
+}
+
+// ОБРАТНЫЙ СИМВОЛ ДЛЯ ЛАТИНИЦЫ (A<->Z, B<->Y, ...)
+static wchar_t atbashLatin(wchar_t c) {
+    if (c >= L'A' && c <= L'Z') {
+        return static_cast<wchar_t>(L'Z' - (c - L'A'));
+    } else if (c >= L'a' && c <= L'z') {
+        return static_cast<wchar_t>(L'z' - (c - L'a'));
+    }
+    return c;
+}
+
+// ОБРАТНЫЙ СИМВОЛ ДЛЯ КИРИЛЛИЦЫ (А<->Я, Б<->Ю, ...)
+static wchar_t atbashCyrillic(wchar_t c) {
+    // Заглавные буквы А-Я (без Ё)
+    if (c >= 0x0410 && c <= 0x042F) {
+        return static_cast<wchar_t>(0x042F - (c - 0x0410));
+    }
+    // Строчные буквы а-я (без ё)
+    else if (c >= 0x0430 && c <= 0x044F) {
+        return static_cast<wchar_t>(0x044F - (c - 0x0430));
+    }
+    // Ё и ё
+    else if (c == 0x0401) {
+        return 0x0401; // Ё -> Ё (зеркально сам себе)
+    }
+    else if (c == 0x0451) {
+        return 0x0451; // ё -> ё (зеркально сам себе)
+    }
+    return c;
+}
+
+// ОБРАТНЫЙ СИМВОЛ ДЛЯ ЦИФР (0<->9, 1<->8, ...)
+static wchar_t atbashDigit(wchar_t c) {
+    if (c >= L'0' && c <= L'9') {
+        return static_cast<wchar_t>(L'9' - (c - L'0'));
+    }
+    return c;
+}
+
+// ОБРАБОТКА СИМВОЛА АТБАШ
+static wchar_t atbashChar(wchar_t c) {
+    if (isLatin(c)) {
+        return atbashLatin(c);
+    } else if (isCyrillic(c)) {
+        return atbashCyrillic(c);
+    } else if (isDigit(c)) {
+        return atbashDigit(c);
+    }
+    return c; // Символ не обрабатываем
+}
+
+// ОБРАБОТКА ТЕКСТА АТБАШ
+static bool atbashProcess(const string& input, string& output) {
+    if (input.empty()) {
+        return false;
+    }
+
+    wstring wInput = stringToWstring(input);
+    if (wInput.empty()) {
+        return false;
+    }
+    
+    wstring wOutput;
+    wOutput.reserve(wInput.length());
+
+    for (wchar_t c : wInput) {
+        wOutput.push_back(atbashChar(c));
+    }
+
+    output = wstringToString(wOutput);
+    return true;
+}
+
+// РАБОТА С ФАЙЛАМИ (ТЕКСТОВЫЙ РЕЖИМ)
 static string readFile(const string& filename) {
     ifstream file(filename);
     if (!file.is_open()) {
@@ -92,16 +217,15 @@ static void waitForEnter() {
     cin.get();
 }
 
-//ГЛАВНАЯ ФУНКЦИЯ АТБАШ
+// ГЛАВНАЯ ФУНКЦИЯ АТБАШ
 void atbashMain() {
-
-    setlocale(LC_ALL, "ru_RU.UTF-8");
-    
+    setlocale(LC_ALL, "");
     system("clear"); // или "cls"
     
     cout << "" << endl;
     cout << "         ШИФР АТБАШ" << endl;
-
+    cout << "   )" << endl;
+    cout << "" << endl;
     
     // Выбор источника
     int source;
@@ -140,7 +264,14 @@ void atbashMain() {
     }
     
     // Обработка
-    string result = atbashProcess(text);
+    string result;
+    bool success = atbashProcess(text, result);
+    
+    if (!success) {
+        cerr << "Ошибка при обработке текста!" << endl;
+        waitForEnter();
+        return;
+    }
     
     // Вывод результата
     printResult(result);
@@ -162,8 +293,7 @@ void atbashMain() {
         }
     }
     
-    
-    
+   
     
     waitForEnter();
 }
